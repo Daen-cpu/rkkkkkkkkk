@@ -1,0 +1,61 @@
+# создание таблицы
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    quantity INTEGER DEFAULT 0
+);
+
+CREATE TABLE operations_log (
+    id SERIAL PRIMARY KEY,
+    product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+    operation VARCHAR(10) CHECK (operation IN ('ADD', 'REMOVE')),
+    quantity INTEGER,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+#создание процедуры
+
+CREATE OR REPLACE PROCEDURE update_stock(product_id INT, operation VARCHAR, quantity INT)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+   
+    IF operation = 'ADD' THEN
+        UPDATE products
+        SET quantity = quantity + quantity
+        WHERE id = product_id;
+        
+    ELSIF operation = 'REMOVE' THEN
+        IF (SELECT quantity FROM products WHERE id = product_id) < quantity THEN
+            RAISE EXCEPTION 'Недостаточно товара для удаления';
+        END IF;
+        
+        UPDATE products
+        SET quantity = quantity - quantity
+        WHERE id = product_id;
+    ELSE
+        RAISE EXCEPTION 'Неизвестная операция: %', operation;
+    END IF;
+    
+    INSERT INTO operations_log (product_id, operation, quantity)
+    VALUES (product_id, operation, quantity);
+    
+END;
+$$;
+
+# создание триггера
+
+CREATE OR REPLACE FUNCTION log_operations() 
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO operations_log (product_id, operation, quantity)
+    VALUES (NEW.id, 'UPDATE', NEW.quantity - OLD.quantity);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER product_update_trigger
+AFTER UPDATE ON products
+FOR EACH ROW
+WHEN (OLD.quantity IS DISTINCT FROM NEW.quantity)
+EXECUTE FUNCTION log_operations();
